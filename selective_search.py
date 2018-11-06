@@ -1,5 +1,4 @@
 import numpy as np
-from numpy import random
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from skimage import segmentation
@@ -13,7 +12,11 @@ img = coffee()
 
 # ss = selectivesearch.selective_search(img)
 init_segments = segmentation.felzenszwalb(img, scale=10, sigma=0.8, min_size=1000)
+channels = [img[:,:,ch] for ch in np.arange(img.shape[2])]
+channels.append(init_segments)
+img_and_seg = np.stack(channels, axis=2)
 # plt.imshow(init_segments, cmap='Dark2')
+
 
 # plt.figure()
 # plt.imshow(img)
@@ -23,20 +26,45 @@ init_segments = segmentation.felzenszwalb(img, scale=10, sigma=0.8, min_size=100
 
 # %% extract regions
 
-def extract_regions(init_segments):
+# A color histogram of 25 bins is calculated for each channel of the image
+def color_hist(reg_mask, bins=25, lower_range=0.0, upper_range=255.0):
+    # reg_mask.shape = (region size, channels)
+    hist = []
+    for channel in np.arange(reg_mask.shape[1]):
+        hist.append(np.histogram(reg_mask[:, channel], bins, (lower_range, upper_range))[0])
+    hist = np.concatenate(hist, axis=0)
+    return hist
+
+def add_prop_reg(img_and_seg, R):
+    R_and_prop = R
+    segments = img_and_seg[:,:,3]
+    for seg in np.unique(segments):
+        # color histogram
+        reg_mask = img_and_seg[:, :, :3][segments == seg]
+        col_hist = color_hist(reg_mask)
+
+        R_and_prop[seg]["col_hist"] = col_hist
+    return R_and_prop
+
+
+def extract_regions(img_and_seg):
     R = []
-    for r in np.unique(init_segments):
-        i = np.asarray(np.where(init_segments == r))
+    segments = img_and_seg if len(img_and_seg.shape) == 2 else img_and_seg[:,:,3]
+    for r in np.unique(segments):
+        i = np.asarray(np.where(segments == r))
         x_min = i[1,:].min()
         x_max = i[1,:].max()
         y_min = i[0,:].min()
         y_max = i[0,:].max()
         width = (x_max - x_min) + 1
         height = (y_max - y_min) + 1
-        R.append({"x_min": x_min, "x_max": x_max, "y_min": y_min, "y_max": y_max, "width": width, "height": height, "size": i.shape[1], "label": r})
+        size = i.shape[1]
+
+        R.append({"x_min": x_min, "x_max": x_max, "y_min": y_min, "y_max": y_max, "width": width, "height": height, "size": size, "label": r})
     return R
 
-R = extract_regions(init_segments)
+R = extract_regions(img_and_seg)
+R_and_prop = add_prop_reg(img_and_seg, R)
 
 # plt.figure()
 # plt.imshow(init_segments)
@@ -61,22 +89,23 @@ def find_neighbours(reg_bb, label):
                 neig.append(r["label"])
     return neig
 
-def extract_neighbors(seg_img, regions, img):
+def extract_neighbors(img_and_seg, regions):
     N = []  # region, neighbours
-    h = img.shape[0]  # rows
-    w = img.shape[1]  # columns
+    h = img_and_seg.shape[0]  # rows
+    w = img_and_seg.shape[1]  # columns
+    segments = img_and_seg[:, :, 3]
     for r in regions:
         x_min = r["x_min"] - 1 if r["x_min"] != 0 else r["x_min"] # +1 padding
         x_max = r["x_max"] + 2 if r["x_max"] != w else r["x_max"] # +1 padding
         y_min = r["y_min"] - 1 if r["y_min"] != 0 else r["y_min"] # +1 padding
         y_max = r["y_max"] + 2 if r["y_max"] != h else r["y_max"] # +1 padding
-        reg_bb = seg_img[y_min:y_max, x_min:x_max]
+        reg_bb = segments[y_min:y_max, x_min:x_max]  # region bounding box
         neig = find_neighbours(reg_bb, r["label"])
         N.append({"region": r["label"], "neig": neig})
     return N
 
 # t1 = datetime.now()
-N = extract_neighbors(init_segments, R, img)
+N = extract_neighbors(img_and_seg, R)
 # t2 = datetime.now()
 # print(t2-t1)
 
@@ -109,14 +138,27 @@ N = extract_neighbors(init_segments, R, img)
 
 #%% calculate similarity
 
-def calc_sim(r1, r2, img):
-    img_size = img.shape[0] * img.shape[1]
-    r1 = [x for x in R if x['label'] == r1]
-    r2 = [x for x in R if x['label'] == r2]
+r1 = [x for x in R if x['label'] == 0][0]
+r2 = [x for x in R if x['label'] == 13][0]
+
+def calc_sim(r1, r2, img_and_seg):
+    img_size = img_and_seg.shape[0] * img_and_seg.shape[1]
+    r1_size = r1['size']
+    r2_size = r2['size']
+    s_size = sim_size(r1_size, r2_size, img_size)
 
 
 
-# def sim_size():
+def sim_size(r1_size, r2_size, img_size):
     # calculate the size similarity over the image
+    return 1.0 - ((r1_size + r2_size) / img_size)
 
-[x for x in R if x['label'] == 13]
+
+# Color similarity of two regions is based on histogram intersection
+def sim_color(r1, r2):
+    hist_r1 = r1['col_hist']
+    hist_r2 = r2['col_hist']
+    return sum([min(a,b) for a,b in zip(hist_r1, hist_r2)])
+
+# plt.hist(img[:,:,0], 25, (0.0, 255.0))
+# plt.show()
