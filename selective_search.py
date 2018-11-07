@@ -4,6 +4,7 @@ from matplotlib.patches import Rectangle
 from skimage import segmentation
 from skimage import measure
 from skimage.data import coffee
+from skimage.feature import hog, local_binary_pattern
 from sklearn.preprocessing import normalize
 from datetime import datetime
 # import selectivesearch
@@ -37,15 +38,46 @@ def color_hist(reg_mask, bins=25, lower_range=0.0, upper_range=255.0):
     hist_norm = normalize(hist.reshape(1, -1), norm='l1')
     return hist_norm.ravel()
 
+def texture_descriptor(img):
+    # we use LBP (local binary pattern)
+    # LBP is an invariant descriptor that can be used for texture classification
+    text_img = []
+    for channel in np.arange(img.shape[2]):
+        text_img.append(local_binary_pattern(img[:,:,channel], 24, 3))
+    return np.stack(text_img, axis=2)
+
+# text_img = texture_descriptor(img)
+# plt.imshow(text_img[:,:,0])
+# plt.show()
+
+# text_reg_mask = text_img[init_segments == 0]
+
+def texture_hist(text_reg_mask, bins=80, lower_range=0.0, upper_range=255.0):
+    # text_reg_mask.shape = (region size, channels)
+    hist = []
+    for channel in np.arange(text_reg_mask.shape[1]):
+        hist.append(np.histogram(text_reg_mask[:, channel], bins, (lower_range, upper_range))[0])
+    hist = np.concatenate(hist, axis=0)
+    hist_norm = normalize(hist.reshape(1, -1), norm='l1')
+    return hist_norm.ravel()
+
+# text_hist = texture_hist(text_reg_mask)
+
 def add_prop_reg(img_and_seg, R):
     R_and_prop = R
     segments = img_and_seg[:,:,3]
+    text_img = texture_descriptor(img_and_seg[:,:,:3])
     for seg in np.unique(segments):
         # color histogram
         reg_mask = img_and_seg[:, :, :3][segments == seg]
         col_hist = color_hist(reg_mask)
 
+        # texture histogram
+        text_reg_mask = text_img[init_segments == seg]
+        text_hist = texture_hist(text_reg_mask)
+
         R_and_prop[seg]["col_hist"] = col_hist
+        R_and_prop[seg]["text_hist"] = text_hist
     return R_and_prop
 
 
@@ -140,15 +172,8 @@ N = extract_neighbors(img_and_seg, R)
 
 #%% calculate similarity
 
-r1 = [x for x in R if x['label'] == 0][0]
-r2 = [x for x in R if x['label'] == 20][0]
-
-def calc_sim(r1, r2, img_and_seg):
-    img_size = img_and_seg.shape[0] * img_and_seg.shape[1]
-    s_size = sim_size(r1, r2, img_size)
-    s_color = sim_color(r1, r2)
-
-
+# r1 = [x for x in R if x['label'] == 0][0]
+# r2 = [x for x in R if x['label'] == 1][0]
 
 def sim_size(r1, r2, img_size):
     # calculate the size similarity over the image
@@ -162,5 +187,61 @@ def sim_color(r1, r2):
     hist_r2 = r2['col_hist']
     return sum([min(a,b) for a,b in zip(hist_r1, hist_r2)])
 
-# def sim_texture():
-#     
+def sim_texture(r1, r2):
+    hist_r1 = r1['text_hist']
+    hist_r2 = r2['text_hist']
+    return sum([min(a, b) for a, b in zip(hist_r1, hist_r2)])
+
+def sim_fill(r1, r2, img_size):
+    # measure how well region r1 and r2 fit into each other
+    r1_size = r1['size']
+    r2_size = r2['size']
+    x_min_BB = min(r1["x_min"], r2["x_min"])
+    x_max_BB = max(r1["x_max"], r2["x_max"])
+    y_min_BB = min(r1["y_min"], r2["y_min"])
+    y_max_BB = max(r1["y_max"], r2["y_max"])
+    BB_size = (y_max_BB - y_min_BB) * (x_max_BB - x_min_BB)
+    return 1.0 - ((BB_size - r1_size - r2_size) / img_size)
+
+
+def calc_sim(r1, r2, img_and_seg, measure=(1,1,1,1)):
+    # measure = (s, c, t, f)
+    s_size, s_color, s_texture, s_fill = 0, 0, 0, 0
+    img_size = img_and_seg.shape[0] * img_and_seg.shape[1]
+    if measure[0]:
+        s_size = sim_size(r1, r2, img_size)
+    if measure[1]:
+        s_color = sim_color(r1, r2)
+    if measure[2]:
+        s_texture = sim_texture(r1, r2)
+    if measure[3]:
+        s_fill = sim_fill(r1, r2, img_size)
+    return (s_size + s_color + s_texture + s_fill) / np.nonzero(measure)[0].size
+
+
+# calculate initial similarities
+def initial_sim(img_and_seg, R, N, measure):
+    S = []
+    for r in N:
+        r1 = [x for x in R if x['label'] == r["region"]][0]
+        for n in r["neig"]:
+            r2 = [x for x in R if x['label'] == n][0]
+            s = calc_sim(r1, r2, img_and_seg, measure=measure)
+            S.append({"regions": [r["region"], n], "sim": s})
+    return S
+
+measure = (1,1,1,1)
+S = initial_sim(img_and_seg, R, N, measure)
+
+# def merge_regions(regions)
+
+
+#%% hierarchical grouping algorithm
+while S != []:
+    # get highest similarity
+    s = [x['sim'] for x in S]
+    max_sim = max(s)
+    regions = S[np.where(s == max_sim)[0][0]]["regions"]
+
+    # merge corresponding regions
+    # merge_regions(regions)
