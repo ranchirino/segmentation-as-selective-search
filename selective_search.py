@@ -4,6 +4,7 @@ from matplotlib.patches import Rectangle
 from skimage import segmentation
 from skimage import measure
 from skimage.data import coffee
+from sklearn.preprocessing import normalize
 from datetime import datetime
 # import selectivesearch
 
@@ -33,7 +34,8 @@ def color_hist(reg_mask, bins=25, lower_range=0.0, upper_range=255.0):
     for channel in np.arange(reg_mask.shape[1]):
         hist.append(np.histogram(reg_mask[:, channel], bins, (lower_range, upper_range))[0])
     hist = np.concatenate(hist, axis=0)
-    return hist
+    hist_norm = normalize(hist.reshape(1, -1), norm='l1')
+    return hist_norm.ravel()
 
 def add_prop_reg(img_and_seg, R):
     R_and_prop = R
@@ -139,20 +141,20 @@ N = extract_neighbors(img_and_seg, R)
 #%% calculate similarity
 
 r1 = [x for x in R if x['label'] == 0][0]
-r2 = [x for x in R if x['label'] == 13][0]
+r2 = [x for x in R if x['label'] == 20][0]
 
 def calc_sim(r1, r2, img_and_seg):
     img_size = img_and_seg.shape[0] * img_and_seg.shape[1]
+    s_size = sim_size(r1, r2, img_size)
+    s_color = sim_color(r1, r2)
+
+
+
+def sim_size(r1, r2, img_size):
+    # calculate the size similarity over the image
     r1_size = r1['size']
     r2_size = r2['size']
-    s_size = sim_size(r1_size, r2_size, img_size)
-
-
-
-def sim_size(r1_size, r2_size, img_size):
-    # calculate the size similarity over the image
     return 1.0 - ((r1_size + r2_size) / img_size)
-
 
 # Color similarity of two regions is based on histogram intersection
 def sim_color(r1, r2):
@@ -160,5 +162,5 @@ def sim_color(r1, r2):
     hist_r2 = r2['col_hist']
     return sum([min(a,b) for a,b in zip(hist_r1, hist_r2)])
 
-# plt.hist(img[:,:,0], 25, (0.0, 255.0))
-# plt.show()
+# def sim_texture():
+#     
