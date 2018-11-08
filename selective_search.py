@@ -98,7 +98,7 @@ def extract_regions(img_and_seg):
     return R
 
 R = extract_regions(img_and_seg)
-R_and_prop = add_prop_reg(img_and_seg, R)
+R = add_prop_reg(img_and_seg, R)
 
 # plt.figure()
 # plt.imshow(init_segments)
@@ -175,6 +175,15 @@ N = extract_neighbors(img_and_seg, R)
 # r1 = [x for x in R if x['label'] == 0][0]
 # r2 = [x for x in R if x['label'] == 1][0]
 
+def calc_BB(r1, r2):
+    # calculate the tight bounding box around r1 and r2
+    x_min_BB = min(r1["x_min"], r2["x_min"])
+    x_max_BB = max(r1["x_max"], r2["x_max"])
+    y_min_BB = min(r1["y_min"], r2["y_min"])
+    y_max_BB = max(r1["y_max"], r2["y_max"])
+    BB_size = (y_max_BB - y_min_BB) * (x_max_BB - x_min_BB)
+    return x_min_BB, x_max_BB, y_min_BB, y_max_BB, BB_size
+
 def sim_size(r1, r2, img_size):
     # calculate the size similarity over the image
     r1_size = r1['size']
@@ -196,13 +205,8 @@ def sim_fill(r1, r2, img_size):
     # measure how well region r1 and r2 fit into each other
     r1_size = r1['size']
     r2_size = r2['size']
-    x_min_BB = min(r1["x_min"], r2["x_min"])
-    x_max_BB = max(r1["x_max"], r2["x_max"])
-    y_min_BB = min(r1["y_min"], r2["y_min"])
-    y_max_BB = max(r1["y_max"], r2["y_max"])
-    BB_size = (y_max_BB - y_min_BB) * (x_max_BB - x_min_BB)
+    _, _, _, _, BB_size = calc_BB(r1, r2)
     return 1.0 - ((BB_size - r1_size - r2_size) / img_size)
-
 
 def calc_sim(r1, r2, img_and_seg, measure=(1,1,1,1)):
     # measure = (s, c, t, f)
@@ -233,15 +237,46 @@ def initial_sim(img_and_seg, R, N, measure):
 measure = (1,1,1,1)
 S = initial_sim(img_and_seg, R, N, measure)
 
-# def merge_regions(regions)
+
+def merge_regions(img_and_seg, regions, R):
+    ri = [x for x in R if x['label'] == regions[0]][0]
+    rj = [x for x in R if x['label'] == regions[1]][0]
+    idx_ri = [i for i, x in enumerate(R) if x['label'] == regions[0]][0]
+    idx_rj = [i for i, x in enumerate(R) if x['label'] == regions[1]][0]
+
+    # new region rt = ri UNION rj
+    img_and_seg[:, :, 3][img_and_seg[:, :, 3] == regions[1]] = regions[0]  # rt = ri + (rj = ri)
+    x_min_rt, x_max_rt, y_min_rt, y_max_rt, _ = calc_BB(ri, rj)
+    width_rt = (x_max_rt - x_min_rt) + 1
+    height_rt = (y_max_rt - y_min_rt) + 1
+    size_rt = ri["size"] + rj["size"]
+    col_hist_rt = (ri["size"] * ri["col_hist"] + rj["size"] * rj["col_hist"]) / size_rt
+    col_hist_rt = normalize(col_hist_rt.reshape(1, -1), norm='l1')
+    text_hist_rt = (ri["size"] * ri["text_hist"] + rj["size"] * rj["text_hist"]) / size_rt
+    text_hist_rt = normalize(text_hist_rt.reshape(1, -1), norm='l1')
+
+    del R[idx_rj]
+    R[idx_ri]["x_min"] = x_min_rt
+    R[idx_ri]["x_max"] = x_max_rt
+    R[idx_ri]["y_min"] = y_min_rt
+    R[idx_ri]["y_max"] = y_max_rt
+    R[idx_ri]["width"] = width_rt
+    R[idx_ri]["height"] = height_rt
+    R[idx_ri]["size"] = size_rt
+    R[idx_ri]["col_hist"] = col_hist_rt
+    R[idx_ri]["text_hist"] = text_hist_rt
+
+    # neighborhood
+
+
 
 
 #%% hierarchical grouping algorithm
-while S != []:
-    # get highest similarity
-    s = [x['sim'] for x in S]
-    max_sim = max(s)
-    regions = S[np.where(s == max_sim)[0][0]]["regions"]
+# while S != []:
+#     # get highest similarity
+#     s = [x['sim'] for x in S]
+#     max_sim = max(s)
+#     regions = S[np.where(s == max_sim)[0][0]]["regions"]
 
     # merge corresponding regions
-    # merge_regions(regions)
+    # merge_regions(img_and_seg, regions, R)
