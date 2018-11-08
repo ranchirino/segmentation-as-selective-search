@@ -17,7 +17,8 @@ init_segments = segmentation.felzenszwalb(img, scale=10, sigma=0.8, min_size=100
 channels = [img[:,:,ch] for ch in np.arange(img.shape[2])]
 channels.append(init_segments)
 img_and_seg = np.stack(channels, axis=2)
-# plt.imshow(init_segments, cmap='Dark2')
+plt.imshow(init_segments)
+plt.show()
 
 
 # plt.figure()
@@ -45,12 +46,6 @@ def texture_descriptor(img):
     for channel in np.arange(img.shape[2]):
         text_img.append(local_binary_pattern(img[:,:,channel], 24, 3))
     return np.stack(text_img, axis=2)
-
-# text_img = texture_descriptor(img)
-# plt.imshow(text_img[:,:,0])
-# plt.show()
-
-# text_reg_mask = text_img[init_segments == 0]
 
 def texture_hist(text_reg_mask, bins=80, lower_range=0.0, upper_range=255.0):
     # text_reg_mask.shape = (region size, channels)
@@ -143,32 +138,6 @@ N = extract_neighbors(img_and_seg, R)
 # t2 = datetime.now()
 # print(t2-t1)
 
-# bb_14 = init_segments[R[14]["y_min"]-1:R[14]["y_max"]+2, R[14]["x_min"]-1:R[14]["x_max"]+2]
-# zeros_arr[np.where(zeros_arr != 0)] = 1
-# plt.imshow(zeros_arr)
-# plt.show()
-# np.unique(zeros_arr[np.where(zeros_arr != 0)])
-
-# contours = measure.find_contours(zeros_arr, 0)
-# cont = np.round(np.concatenate(contours)).astype('int32')
-# plt.imshow(contours)
-# plt.show()
-
-# zeros_arr[cont[:,0], cont[:,1]] = 20
-# props = measure.regionprops(zeros_arr)
-# zeros_arr[props[0].coords[:,0], props[0].coords[:,1]] = 20
-# plt.imshow(zeros_arr)
-# plt.show()
-
-# n = []
-# for cont in contours:
-#     c = np.round(cont).astype('int32')
-#     pix_cont = c[random.randint(len(c))]
-#     window = zeros_arr[pix_cont[0]-1:pix_cont[0]+2, pix_cont[1]-1:pix_cont[1]+2]
-#     reg = np.unique(window)
-#     if 0 in reg:
-#         n.append(reg[(reg != 20) & (reg != 0)])
-
 
 #%% calculate similarity
 
@@ -230,15 +199,26 @@ def initial_sim(img_and_seg, R, N, measure):
         r1 = [x for x in R if x['label'] == r["region"]][0]
         for n in r["neig"]:
             r2 = [x for x in R if x['label'] == n][0]
-            s = calc_sim(r1, r2, img_and_seg, measure=measure)
-            S.append({"regions": [r["region"], n], "sim": s})
+            if n > r["region"]:
+                s = calc_sim(r1, r2, img_and_seg, measure=measure)
+                S.append({"regions": [r["region"], n], "sim": s})
+    return S
+
+# calculate new region similarities
+def new_sim(img_and_seg, R, rt, measure):
+    S = []
+    r1 = [x for x in R if x['label'] == rt["region"]][0]
+    for n in rt["neig"]:
+        r2 = [x for x in R if x['label'] == n][0]
+        s = calc_sim(r1, r2, img_and_seg, measure=measure)
+        S.append({"regions": [rt["region"], n], "sim": s})
     return S
 
 measure = (1,1,1,1)
-S = initial_sim(img_and_seg, R, N, measure)
+init_S = initial_sim(img_and_seg, R, N, measure)
 
 
-def merge_regions(img_and_seg, regions, R):
+def merge_regions(img_and_seg, regions, R, N):
     ri = [x for x in R if x['label'] == regions[0]][0]
     rj = [x for x in R if x['label'] == regions[1]][0]
     idx_ri = [i for i, x in enumerate(R) if x['label'] == regions[0]][0]
@@ -251,9 +231,9 @@ def merge_regions(img_and_seg, regions, R):
     height_rt = (y_max_rt - y_min_rt) + 1
     size_rt = ri["size"] + rj["size"]
     col_hist_rt = (ri["size"] * ri["col_hist"] + rj["size"] * rj["col_hist"]) / size_rt
-    col_hist_rt = normalize(col_hist_rt.reshape(1, -1), norm='l1')
+    col_hist_rt = normalize(col_hist_rt.reshape(1, -1), norm='l1')[0]
     text_hist_rt = (ri["size"] * ri["text_hist"] + rj["size"] * rj["text_hist"]) / size_rt
-    text_hist_rt = normalize(text_hist_rt.reshape(1, -1), norm='l1')
+    text_hist_rt = normalize(text_hist_rt.reshape(1, -1), norm='l1')[0]
 
     del R[idx_rj]
     R[idx_ri]["x_min"] = x_min_rt
@@ -267,16 +247,42 @@ def merge_regions(img_and_seg, regions, R):
     R[idx_ri]["text_hist"] = text_hist_rt
 
     # neighborhood
+    idxN_ri = [i for i, x in enumerate(N) if x['region'] == regions[0]][0]
+    idxN_rj = [i for i, x in enumerate(N) if x['region'] == regions[1]][0]
+    N[idxN_ri]["neig"].remove(regions[1])
+    N[idxN_rj]["neig"].remove(regions[0])
+    for n in N[idxN_rj]["neig"]:
+        if n not in N[idxN_ri]["neig"]:
+            N[idxN_ri]["neig"].append(n)
+        idx_n = [i for i, x in enumerate(N) if x['region'] == n][0]
+        N[idx_n]["neig"].remove(regions[1])
+        if regions[0] not in N[idx_n]["neig"]:
+            N[idx_n]["neig"].append(regions[0])
+    del N[idxN_rj]
 
-
+    return img_and_seg, R, N
 
 
 #%% hierarchical grouping algorithm
-# while S != []:
+while init_S != []:
 #     # get highest similarity
-#     s = [x['sim'] for x in S]
-#     max_sim = max(s)
-#     regions = S[np.where(s == max_sim)[0][0]]["regions"]
+    s = [x['sim'] for x in init_S]
+    max_sim = max(s)
+    regions = init_S[np.where(s == max_sim)[0][0]]["regions"]
 
     # merge corresponding regions
-    # merge_regions(img_and_seg, regions, R)
+    img_and_seg, R, N = merge_regions(img_and_seg, regions, R, N)
+
+    # remove similarities
+    del init_S[np.where(s == max_sim)[0][0]]
+    for i, r in enumerate(init_S):
+        if any([regions[0] in r["regions"], regions[1] in r["regions"]]):
+            del init_S[i]
+
+    # calculate similarity set between rt and its neighbours
+    rt = [x for x in N if x['region'] == regions[0]][0]
+    new_S = new_sim(img_and_seg, R, rt, measure)
+    init_S = init_S + new_S
+
+# plt.imshow(img_and_seg[:, :, 3])
+# plt.show()
