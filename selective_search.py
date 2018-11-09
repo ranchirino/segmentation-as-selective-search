@@ -163,4 +163,4 @@ def sim_color(r1, r2):
     return sum([min(a,b) for a,b in zip(hist_r1, hist_r2)])
 
 # def sim_texture():
-#     
+#
