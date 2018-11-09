@@ -6,6 +6,7 @@ from skimage import measure
 from skimage.data import coffee
 from skimage.feature import hog, local_binary_pattern
 from sklearn.preprocessing import normalize
+from scipy.ndimage.morphology import binary_dilation
 from datetime import datetime
 # import selectivesearch
 
@@ -108,14 +109,36 @@ R = add_prop_reg(img_and_seg, R)
 
 # %% extract neighbors
 
+def get_bb(window, label):
+    i = np.asarray(np.where(window == label))
+    x_min = i[1, :].min()
+    x_max = i[1, :].max()
+    y_min = i[0, :].min()
+    y_max = i[0, :].max()
+    return x_min, x_max, y_min, y_max
+
+
+
 def find_neighbours(reg_bb, label):
-    reg = extract_regions(reg_bb)
     neig = []
-    for r in reg:
-        if r["label"] != label:
-            window = reg_bb[r["y_min"]:r["y_max"]+1, r["x_min"]:r["x_max"]+1]
-            if label in window:
-                neig.append(r["label"])
+    mask = np.zeros(reg_bb.shape)
+    mask[np.where(reg_bb == label)] = label
+    struct = np.ones((3, 3))
+    mask_dilated = binary_dilation(mask, structure=struct)
+    mask[np.where(mask_dilated == True)] = label
+    mask[np.where(mask == 0)] = reg_bb[np.where(mask == 0)]
+    xor_result = np.logical_or(reg_bb, mask)
+    xor_result = np.logical_xor(reg_bb, mask)
+
+    # reg = extract_regions(reg_bb)
+    # for r in reg:
+    #     if r["label"] != label:
+    #         window = reg_bb[r["y_min"]:r["y_max"]+1, r["x_min"]:r["x_max"]+1]
+    #         if label in window:
+    #             x_min, x_max, y_min, y_max = get_bb(window, r["label"])
+    #             window = window[y_min:y_max + 1, x_min:x_max + 1]
+    #             if label in window:
+    #                 neig.append(r["label"])
     return neig
 
 def extract_neighbors(img_and_seg, regions):
@@ -236,7 +259,6 @@ def merge_regions(img_and_seg, regions, R, N):
     text_hist_rt = (ri["size"] * ri["text_hist"] + rj["size"] * rj["text_hist"]) / size_rt
     text_hist_rt = normalize(text_hist_rt.reshape(1, -1), norm='l1')[0]
 
-    del R[idx_rj]
     R[idx_ri]["x_min"] = x_min_rt
     R[idx_ri]["x_max"] = x_max_rt
     R[idx_ri]["y_min"] = y_min_rt
@@ -255,10 +277,13 @@ def merge_regions(img_and_seg, regions, R, N):
     for n in N[idxN_rj]["neig"]:
         if n not in N[idxN_ri]["neig"]:
             N[idxN_ri]["neig"].append(n)
+
         idx_n = [i for i, x in enumerate(N) if x['region'] == n][0]
         N[idx_n]["neig"].remove(regions[1])
         if regions[0] not in N[idx_n]["neig"]:
             N[idx_n]["neig"].append(regions[0])
+
+    del R[idx_rj]
     del N[idxN_rj]
 
     return img_and_seg, R, N
@@ -266,25 +291,27 @@ def merge_regions(img_and_seg, regions, R, N):
 
 #%% hierarchical grouping algorithm
 # while init_S != []:
-    # get highest similarity
-s = [x['sim'] for x in init_S]
-max_sim = max(s)
-regions = init_S[np.where(s == max_sim)[0][0]]["regions"]
-
-    # merge corresponding regions
-img_and_seg, R, N = merge_regions(img_and_seg, regions, R, N)
-
-    # remove similarities
-del init_S[np.where(s == max_sim)[0][0]]
-for i, r in enumerate(init_S):
-    if any([regions[0] in r["regions"], regions[1] in r["regions"]]):
-        del init_S[i]
-
-    # calculate similarity set between rt and its neighbours
-rt = [x for x in N if x['region'] == regions[0]][0]
-new_S = new_sim(img_and_seg, R, rt, measure)
-init_S = init_S + new_S
+#     # get highest similarity
+#     s = [x['sim'] for x in init_S]
+#     max_sim = max(s)
+#     regions = init_S[np.where(s == max_sim)[0][0]]["regions"]
+#
+#     # merge corresponding regions
+#     img_and_seg, R, N = merge_regions(img_and_seg, regions, R, N)
+#
+#     # remove similarities
+#     del_ind = []
+#     for i, r in enumerate(init_S):
+#         if any([regions[0] in r["regions"], regions[1] in r["regions"]]):
+#             del_ind.append(i)
+#     init_S = np.delete(init_S, del_ind).tolist()
+#
+#     # calculate similarity set between rt and its neighbours
+#     rt = [x for x in N if x['region'] == regions[0]][0]
+#     new_S = new_sim(img_and_seg, R, rt, measure)
+#     init_S = init_S + new_S
 
 # plt.imshow(img_and_seg[:, :, 3])
 # plt.show()
 
+# mejorar el algoritmo de busqueda de vecinos
