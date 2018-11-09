@@ -165,10 +165,7 @@ def sim_color(r1, r2):
     hist_r2 = r2['col_hist']
     return sum([min(a,b) for a,b in zip(hist_r1, hist_r2)])
 
-<<<<<<< HEAD
-# def sim_texture():
-#
-=======
+
 def sim_texture(r1, r2):
     hist_r1 = r1['text_hist']
     hist_r2 = r2['text_hist']
@@ -268,26 +265,26 @@ def merge_regions(img_and_seg, regions, R, N):
 
 
 #%% hierarchical grouping algorithm
-while init_S != []:
-#     # get highest similarity
-    s = [x['sim'] for x in init_S]
-    max_sim = max(s)
-    regions = init_S[np.where(s == max_sim)[0][0]]["regions"]
+# while init_S != []:
+    # get highest similarity
+s = [x['sim'] for x in init_S]
+max_sim = max(s)
+regions = init_S[np.where(s == max_sim)[0][0]]["regions"]
 
     # merge corresponding regions
-    img_and_seg, R, N = merge_regions(img_and_seg, regions, R, N)
+img_and_seg, R, N = merge_regions(img_and_seg, regions, R, N)
 
     # remove similarities
-    del init_S[np.where(s == max_sim)[0][0]]
-    for i, r in enumerate(init_S):
-        if any([regions[0] in r["regions"], regions[1] in r["regions"]]):
-            del init_S[i]
+del init_S[np.where(s == max_sim)[0][0]]
+for i, r in enumerate(init_S):
+    if any([regions[0] in r["regions"], regions[1] in r["regions"]]):
+        del init_S[i]
 
     # calculate similarity set between rt and its neighbours
-    rt = [x for x in N if x['region'] == regions[0]][0]
-    new_S = new_sim(img_and_seg, R, rt, measure)
-    init_S = init_S + new_S
+rt = [x for x in N if x['region'] == regions[0]][0]
+new_S = new_sim(img_and_seg, R, rt, measure)
+init_S = init_S + new_S
 
 # plt.imshow(img_and_seg[:, :, 3])
 # plt.show()
->>>>>>> b3de220ca1fc46945ad4e8ed9a1516334a19ca27
+
