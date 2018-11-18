@@ -2,9 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from skimage import segmentation
-from skimage import measure
 from skimage.data import coffee
-from skimage.feature import hog, local_binary_pattern
+from skimage.feature import local_binary_pattern
 from sklearn.preprocessing import normalize
 from scipy.ndimage.morphology import binary_dilation
 from datetime import datetime
@@ -14,7 +13,7 @@ img = coffee()
 # plt.imshow(img)
 
 # ss = selectivesearch.selective_search(img)
-init_segments = segmentation.felzenszwalb(img, scale=10, sigma=0.8, min_size=1000)
+init_segments = segmentation.felzenszwalb(img, scale=20, sigma=0.8, min_size=1000)
 channels = [img[:,:,ch] for ch in np.arange(img.shape[2])]
 channels.append(init_segments)
 img_and_seg = np.stack(channels, axis=2)
@@ -120,15 +119,14 @@ def get_bb(window, label):
 
 
 def find_neighbours(reg_bb, label):
-    neig = []
     mask = np.zeros(reg_bb.shape)
-    mask[np.where(reg_bb == label)] = label
+    mask[np.where(reg_bb == label)] = 1
     struct = np.ones((3, 3))
     mask_dilated = binary_dilation(mask, structure=struct)
+    mask[np.where(mask_dilated == False)] = reg_bb[np.where(mask_dilated == False)]
     mask[np.where(mask_dilated == True)] = label
-    mask[np.where(mask == 0)] = reg_bb[np.where(mask == 0)]
-    xor_result = np.logical_or(reg_bb, mask)
-    xor_result = np.logical_xor(reg_bb, mask)
+    dif = abs(mask - reg_bb)
+    neig = np.unique(reg_bb[np.where(dif != 0)]).tolist()
 
     # reg = extract_regions(reg_bb)
     # for r in reg:
@@ -290,28 +288,44 @@ def merge_regions(img_and_seg, regions, R, N):
 
 
 #%% hierarchical grouping algorithm
+sim_threshold = 0.65
+
 # while init_S != []:
-#     # get highest similarity
-#     s = [x['sim'] for x in init_S]
-#     max_sim = max(s)
-#     regions = init_S[np.where(s == max_sim)[0][0]]["regions"]
-#
-#     # merge corresponding regions
-#     img_and_seg, R, N = merge_regions(img_and_seg, regions, R, N)
-#
-#     # remove similarities
-#     del_ind = []
-#     for i, r in enumerate(init_S):
-#         if any([regions[0] in r["regions"], regions[1] in r["regions"]]):
-#             del_ind.append(i)
-#     init_S = np.delete(init_S, del_ind).tolist()
-#
-#     # calculate similarity set between rt and its neighbours
-#     rt = [x for x in N if x['region'] == regions[0]][0]
-#     new_S = new_sim(img_and_seg, R, rt, measure)
-#     init_S = init_S + new_S
+under_thres = False
+while under_thres == False:
+    # get highest similarity
+    s = [x['sim'] for x in init_S]
+    max_sim = max(s)
 
+    if max_sim >= sim_threshold:
+        regions = init_S[np.where(s == max_sim)[0][0]]["regions"]
+
+        # merge corresponding regions
+        img_and_seg, R, N = merge_regions(img_and_seg, regions, R, N)
+
+        # remove similarities
+        del_ind = []
+        for i, r in enumerate(init_S):
+            if any([regions[0] in r["regions"], regions[1] in r["regions"]]):
+                del_ind.append(i)
+        init_S = np.delete(init_S, del_ind).tolist()
+
+        # calculate similarity set between rt and its neighbours
+        rt = [x for x in N if x['region'] == regions[0]][0]
+        new_S = new_sim(img_and_seg, R, rt, measure)
+        init_S = init_S + new_S
+    else:
+        under_thres = True
+
+
+fig = plt.figure()
+ax = fig.add_axes()
+# plt.subplot(1, 2, 1)
+plt.imshow(img)
+for r in R:
+    rect = Rectangle((r['x_min'], r['y_min']), r['width'], r['height'], fill=False, color='red', linewidth=1.0)
+    plt.axes().add_patch(rect)
+# plt.subplot(1, 2, 2)
 # plt.imshow(img_and_seg[:, :, 3])
-# plt.show()
+plt.show()
 
-# mejorar el algoritmo de busqueda de vecinos
