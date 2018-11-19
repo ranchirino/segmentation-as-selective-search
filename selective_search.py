@@ -1,33 +1,16 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
 from skimage import segmentation
-from skimage.data import coffee
 from skimage.feature import local_binary_pattern
+from skimage.color import rgb2hsv
 from sklearn.preprocessing import normalize
 from scipy.ndimage.morphology import binary_dilation
-from datetime import datetime
-# import selectivesearch
-
-img = coffee()
-# plt.imshow(img)
-
-# ss = selectivesearch.selective_search(img)
-init_segments = segmentation.felzenszwalb(img, scale=20, sigma=0.8, min_size=1000)
-channels = [img[:,:,ch] for ch in np.arange(img.shape[2])]
-channels.append(init_segments)
-img_and_seg = np.stack(channels, axis=2)
-plt.imshow(init_segments)
-plt.show()
 
 
-# plt.figure()
-# plt.imshow(img)
-# rect = Rectangle((100, 100), 60, 80, fill=False, color='red', linewidth=2.0)
-# plt.axes().add_patch(rect)
-# plt.show()
-
-# %% extract regions
+def initial_regions(image, scale):
+    init_segments = segmentation.felzenszwalb(image, scale=scale, sigma=0.8, min_size=1000)
+    channels = [image[:, :, ch] for ch in np.arange(image.shape[2])]
+    channels.append(init_segments)
+    return np.stack(channels, axis=2)
 
 # A color histogram of 25 bins is calculated for each channel of the image
 def color_hist(reg_mask, bins=25, lower_range=0.0, upper_range=255.0):
@@ -56,8 +39,6 @@ def texture_hist(text_reg_mask, bins=80, lower_range=0.0, upper_range=255.0):
     hist_norm = normalize(hist.reshape(1, -1), norm='l1')
     return hist_norm.ravel()
 
-# text_hist = texture_hist(text_reg_mask)
-
 def add_prop_reg(img_and_seg, R):
     R_and_prop = R
     segments = img_and_seg[:,:,3]
@@ -68,13 +49,12 @@ def add_prop_reg(img_and_seg, R):
         col_hist = color_hist(reg_mask)
 
         # texture histogram
-        text_reg_mask = text_img[init_segments == seg]
+        text_reg_mask = text_img[segments == seg]
         text_hist = texture_hist(text_reg_mask)
 
         R_and_prop[seg]["col_hist"] = col_hist
         R_and_prop[seg]["text_hist"] = text_hist
     return R_and_prop
-
 
 def extract_regions(img_and_seg):
     R = []
@@ -92,22 +72,6 @@ def extract_regions(img_and_seg):
         R.append({"x_min": x_min, "x_max": x_max, "y_min": y_min, "y_max": y_max, "width": width, "height": height, "size": size, "label": r})
     return R
 
-R = extract_regions(img_and_seg)
-R = add_prop_reg(img_and_seg, R)
-
-# plt.figure()
-# plt.imshow(init_segments)
-# for r in R.items():
-#     d = r[1]
-#     rect = Rectangle((d['x_min'], d['y_min']), d['width'], d['height'], fill=False, color='red', linewidth=1.0)
-#     plt.axes().add_patch(rect)
-# plt.show()
-
-# plt.imshow(init_segments)
-# plt.show()
-
-# %% extract neighbors
-
 def get_bb(window, label):
     i = np.asarray(np.where(window == label))
     x_min = i[1, :].min()
@@ -115,8 +79,6 @@ def get_bb(window, label):
     y_min = i[0, :].min()
     y_max = i[0, :].max()
     return x_min, x_max, y_min, y_max
-
-
 
 def find_neighbours(reg_bb, label):
     mask = np.zeros(reg_bb.shape)
@@ -128,15 +90,6 @@ def find_neighbours(reg_bb, label):
     dif = abs(mask - reg_bb)
     neig = np.unique(reg_bb[np.where(dif != 0)]).tolist()
 
-    # reg = extract_regions(reg_bb)
-    # for r in reg:
-    #     if r["label"] != label:
-    #         window = reg_bb[r["y_min"]:r["y_max"]+1, r["x_min"]:r["x_max"]+1]
-    #         if label in window:
-    #             x_min, x_max, y_min, y_max = get_bb(window, r["label"])
-    #             window = window[y_min:y_max + 1, x_min:x_max + 1]
-    #             if label in window:
-    #                 neig.append(r["label"])
     return neig
 
 def extract_neighbors(img_and_seg, regions):
@@ -153,17 +106,6 @@ def extract_neighbors(img_and_seg, regions):
         neig = find_neighbours(reg_bb, r["label"])
         N.append({"region": r["label"], "neig": neig})
     return N
-
-# t1 = datetime.now()
-N = extract_neighbors(img_and_seg, R)
-# t2 = datetime.now()
-# print(t2-t1)
-
-
-#%% calculate similarity
-
-# r1 = [x for x in R if x['label'] == 0][0]
-# r2 = [x for x in R if x['label'] == 1][0]
 
 def calc_BB(r1, r2):
     # calculate the tight bounding box around r1 and r2
@@ -185,7 +127,6 @@ def sim_color(r1, r2):
     hist_r1 = r1['col_hist']
     hist_r2 = r2['col_hist']
     return sum([min(a,b) for a,b in zip(hist_r1, hist_r2)])
-
 
 def sim_texture(r1, r2):
     hist_r1 = r1['text_hist']
@@ -213,7 +154,6 @@ def calc_sim(r1, r2, img_and_seg, measure=(1,1,1,1)):
         s_fill = sim_fill(r1, r2, img_size)
     return (s_size + s_color + s_texture + s_fill) / np.nonzero(measure)[0].size
 
-
 # calculate initial similarities
 def initial_sim(img_and_seg, R, N, measure):
     S = []
@@ -235,10 +175,6 @@ def new_sim(img_and_seg, R, rt, measure):
         s = calc_sim(r1, r2, img_and_seg, measure=measure)
         S.append({"regions": [rt["region"], n], "sim": s})
     return S
-
-measure = (1,1,1,1)
-init_S = initial_sim(img_and_seg, R, N, measure)
-
 
 def merge_regions(img_and_seg, regions, R, N):
     ri = [x for x in R if x['label'] == regions[0]][0]
@@ -287,45 +223,75 @@ def merge_regions(img_and_seg, regions, R, N):
     return img_and_seg, R, N
 
 
-#%% hierarchical grouping algorithm
-sim_threshold = 0.65
+#%%
 
-# while init_S != []:
-under_thres = False
-while under_thres == False:
-    # get highest similarity
-    s = [x['sim'] for x in init_S]
-    max_sim = max(s)
+def selective_search(image, colour_space="hsv", scale=20, measure=(1,1,1,1), sim_threshold=0.65):
+    """
+    Parameters
+    ----------
+    :param image: (width, height, 3) ndarray
+        Input image.
+    :param colour_space: {"rgb", "hsv"}
+        Colour space to perform our hierarchical grouping algorithm.
+    :param scale: float
+        Free parameter. Higher means larger clusters in the initial segmentation (Felsenszwalb's segmentation).
+    :param measure: (size, colour, texture, fill) tuple
+        Define the similarity measures to use.
+    :param sim_threshold: float
+        Indicates the threshold of similarity between regions in range [0,1].
 
-    if max_sim >= sim_threshold:
-        regions = init_S[np.where(s == max_sim)[0][0]]["regions"]
+    Returns
+    -------
+    :segment_mask: (width, height) ndarray
+        Ndarray with the same width and height that the input image with labeled regions.
+    :regions: list
+        List of dict with the properties of the regions
+    """
 
-        # merge corresponding regions
-        img_and_seg, R, N = merge_regions(img_and_seg, regions, R, N)
+    if colour_space == "hsv":
+        image = rgb2hsv(image)
+        image = image - image.min()  # min = 0
+        image = image / image.max()  # max = 1
+        image = image * 255
+        image = image.astype(np.uint8)
 
-        # remove similarities
-        del_ind = []
-        for i, r in enumerate(init_S):
-            if any([regions[0] in r["regions"], regions[1] in r["regions"]]):
-                del_ind.append(i)
-        init_S = np.delete(init_S, del_ind).tolist()
+    # obtain initial regions
+    # return image and initial segments, shape[2] = (channel1, channel2, channel3, segments)
+    img_and_seg = initial_regions(image, scale)
+    R = extract_regions(img_and_seg)
+    R = add_prop_reg(img_and_seg, R)
 
-        # calculate similarity set between rt and its neighbours
-        rt = [x for x in N if x['region'] == regions[0]][0]
-        new_S = new_sim(img_and_seg, R, rt, measure)
-        init_S = init_S + new_S
-    else:
-        under_thres = True
+    # extract neighboring regions
+    N = extract_neighbors(img_and_seg, R)
 
+    # calculate similarity
+    init_S = initial_sim(img_and_seg, R, N, measure)
 
-fig = plt.figure()
-ax = fig.add_axes()
-# plt.subplot(1, 2, 1)
-plt.imshow(img)
-for r in R:
-    rect = Rectangle((r['x_min'], r['y_min']), r['width'], r['height'], fill=False, color='red', linewidth=1.0)
-    plt.axes().add_patch(rect)
-# plt.subplot(1, 2, 2)
-# plt.imshow(img_and_seg[:, :, 3])
-plt.show()
+    # hierarchical grouping algorithm
+    under_thres = False
+    while under_thres == False:
+        # get highest similarity
+        s = [x['sim'] for x in init_S]
+        max_sim = max(s)
 
+        if max_sim >= sim_threshold:
+            regions = init_S[np.where(s == max_sim)[0][0]]["regions"]
+
+            # merge corresponding regions
+            img_and_seg, R, N = merge_regions(img_and_seg, regions, R, N)
+
+            # remove similarities
+            del_ind = []
+            for i, r in enumerate(init_S):
+                if any([regions[0] in r["regions"], regions[1] in r["regions"]]):
+                    del_ind.append(i)
+            init_S = np.delete(init_S, del_ind).tolist()
+
+            # calculate similarity set between rt and its neighbours
+            rt = [x for x in N if x['region'] == regions[0]][0]
+            new_S = new_sim(img_and_seg, R, rt, measure)
+            init_S = init_S + new_S
+        else:
+            under_thres = True
+
+    return img_and_seg[:, :, 3], R
