@@ -7,10 +7,10 @@ from datetime import datetime
 
 from selective_search import selective_search
 
-# img = data.coffee()
+img = data.coffee()
 # img = data.astronaut()
 # img = data.chelsea()
-img = imread("image1.jpg")
+# img = imread("image1.jpg")
 t1 = datetime.now()
 segment_mask, R = selective_search(img, scale=150, sim_threshold=0.65)
 t2 = datetime.now()
