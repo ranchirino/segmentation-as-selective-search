@@ -258,6 +258,7 @@ def selective_search(image, colour_space="hsv", scale=20, measure=(1,1,1,1), sim
     # obtain initial regions
     # return image and initial segments, shape[2] = (channel1, channel2, channel3, segments)
     img_and_seg = initial_regions(image, scale)
+    print(len(np.unique(img_and_seg[:,:,3])), "initial regions")
     R = extract_regions(img_and_seg)
     R = add_prop_reg(img_and_seg, R)
 
